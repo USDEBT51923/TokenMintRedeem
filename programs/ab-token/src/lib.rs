@@ -19,7 +19,7 @@ use error::*;
 use account::*;
 use constants::*;
 
-declare_id!("8yy8kYzNyAwSgeVTRKZUMmbKwi7WNzLRD6RWvVnSxgaF");
+declare_id!("7vfAZgrKyYV2e3XTKuwisXfVcdSY7vMZ7N5m6ppNMboP");
 
 #[program]
 pub mod ab_token {
@@ -33,7 +33,6 @@ pub mod ab_token {
         global_authority.admin = ctx.accounts.admin.key();
         global_authority.old_token = OLD_TOKEN.parse::<Pubkey>().unwrap();
         global_authority.new_token = NEW_TOKEN.parse::<Pubkey>().unwrap();
-        global_authority.token_treasury = TOKEN_TREASURY.parse::<Pubkey>().unwrap();
         msg!("SuperAdmin: {:?}", global_authority.admin.key());
         Ok(())
     }
@@ -70,50 +69,34 @@ pub mod ab_token {
         Ok(())
     }
 
-    
-    pub fn update_new_treasury(
-        ctx: Context<UpdateGlobalState>,
-        _global_bump: u8,
-        new_treasury: Option<Pubkey>
-    ) -> Result<()> {
-        let global_authority = &mut ctx.accounts.global_authority;
- 
-        require!(ctx.accounts.admin.key() == global_authority.admin.key(), ABTokenError::InvalidSuperOwner);
-
-        if let Some(update_new_treasury) = new_treasury {
-            msg!("New Token Changed to {:?}", update_new_treasury);
-            global_authority.token_treasury = update_new_treasury;
-        }
-        Ok(())
-    }
-
     pub fn token_transfer_mint_to<'info>(
         ctx: Context<TokenMintTo>,
         _global_bump: u8,
         amount: u64
     ) -> Result<()> {
         let global_authority = &mut ctx.accounts.global_authority;
-        let from = ctx.accounts.old_token.to_account_info().clone();
+        let vault = &mut ctx.accounts.vault;
+        let from = ctx.accounts.old_token_account.to_account_info().clone();
         let authority = ctx.accounts.user.to_account_info().clone();
-        let to = ctx.accounts.token_treasury.to_account_info().clone();
- 
+
+        
         let cpi_ctx: CpiContext<_> = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
                 from,
                 authority,
-                to
+                to: vault.to_account_info().clone()
             },
         );
         token::transfer(cpi_ctx, amount)?;
 
-        const SEED: &[u8] = b"global-authority";
+        const GLOBAL_AUTHORITY_SEED: &[u8] = b"global-authority";
 
-        let (_global_authority, _bump) = Pubkey::find_program_address(&[SEED], ctx.program_id);
-        let authority_seed = &[&SEED[..], &[_bump]];
+        let (_global_authority, _bump) = Pubkey::find_program_address(&[GLOBAL_AUTHORITY_SEED], ctx.program_id);
+        let authority_seed = &[&GLOBAL_AUTHORITY_SEED[..], &[_bump]];
     
         let cpi_accounts = MintTo {
-            mint: ctx.accounts.new_token.to_account_info().clone(),
+            mint: ctx.accounts.new_token_mint.to_account_info().clone(),
             to: ctx.accounts.token_destination.to_account_info().clone(),
             authority: global_authority.to_account_info().clone(),
         };
@@ -133,9 +116,10 @@ pub mod ab_token {
         amount: u64
     ) -> Result<()> {
         let global_authority = &mut ctx.accounts.global_authority;
+        let vault = &mut ctx.accounts.vault;
         let authority = ctx.accounts.user.to_account_info().clone();
         let mint = ctx.accounts.new_token_mint.to_account_info().clone();
-        let from = ctx.accounts.new_token_account.to_account_info().clone();
+        let from =  ctx.accounts.new_token_account.to_account_info().clone();
 
         let cpi_ctx: CpiContext<_> = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
@@ -152,9 +136,9 @@ pub mod ab_token {
         let (_global_authority, _bump) = Pubkey::find_program_address(&[SEED], ctx.program_id);
         let authority_seed = &[&SEED[..], &[_bump]];
     
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.token_treasury.to_account_info().clone(),
-            to: ctx.accounts.token_destination.to_account_info().clone(),
+        let cpi_accounts: Transfer<'_> = Transfer {
+            from: vault.to_account_info().clone(),
+            to: ctx.accounts.old_token_account.to_account_info().clone(),
             authority: global_authority.to_account_info().clone(),
         };
 
@@ -180,9 +164,24 @@ pub struct Initialize<'info> {
 
     #[account(mut)]
     pub admin: Signer<'info>,
+
+    #[account(mut)]
+    pub old_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        init,
+        seeds=[VAULT_SEED.as_ref()],
+        bump,
+        token::mint = old_token_mint,
+        token::authority = global_authority,
+        payer = admin
+    )]
+    pub vault: Account<'info, TokenAccount>,
     
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>
+    pub rent: Sysvar<'info, Rent>,
+    token_program: Program<'info, Token>
+
 }
 
 #[derive(Accounts)]
@@ -215,20 +214,27 @@ pub struct TokenMintTo<'info> {
     pub user: Signer<'info>,
 
     #[account(mut)]
-    pub old_token: Box<Account<'info, TokenAccount>>,
+    pub old_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
-    pub new_token: Box<Account<'info, Mint>>,
+    pub old_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(mut)]
+    pub new_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        mut,
+        seeds=[VAULT_SEED.as_ref()],
+        bump,
+        token::mint = old_token_mint,
+        token::authority = global_authority,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+
 
     #[account(mut)]
     pub token_destination: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK instruction will fail if wrong edition is supplied
-    #[account(
-        mut,
-        constraint = token_treasury.key() == TOKEN_TREASURY.parse::<Pubkey>().unwrap()
-    )]
-    pub token_treasury: AccountInfo<'info>,
 
     token_program: Program<'info, Token>
 
@@ -246,24 +252,34 @@ pub struct Redeem<'info> {
     )]
     pub global_authority: Box<Account<'info, GlobalInfo>>,
 
+    
+    #[account(mut)]
+    pub old_token_mint: Box<Account<'info, Mint>>,
+
+
+
+    #[account(
+        mut,
+        seeds=[VAULT_SEED.as_ref()],
+        bump,
+        token::mint = old_token_mint,
+        token::authority = global_authority,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+
+
     #[account(mut)]
     pub user: Signer<'info>,
 
     #[account(mut)]
-    pub new_token_account: Box<Account<'info, Mint>>,
+    pub new_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut)]
+    pub old_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub new_token_mint: Box<Account<'info, Mint>>,
-
-    #[account(mut)]
-    pub token_destination: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK instruction will fail if wrong edition is supplied
-    #[account(
-        mut,
-        constraint = token_treasury.key() == TOKEN_TREASURY.parse::<Pubkey>().unwrap()
-    )]
-    pub token_treasury: AccountInfo<'info>,
 
     token_program: Program<'info, Token>
 

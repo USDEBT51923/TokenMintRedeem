@@ -69,6 +69,22 @@ pub mod ab_token {
         Ok(())
     }
 
+    pub fn update_new_admin(
+        ctx: Context<UpdateGlobalState>,
+        _global_bump: u8,
+        new_admin: Option<Pubkey>
+    ) -> Result<()> {
+        let global_authority = &mut ctx.accounts.global_authority;
+ 
+        require!(ctx.accounts.admin.key() == global_authority.admin.key(), ABTokenError::InvalidSuperOwner);
+
+        if let Some(update_new_admin) = new_admin {
+            msg!("New Token Changed to {:?}", update_new_admin);
+            global_authority.admin = update_new_admin;
+        }
+        Ok(())
+    }
+
     pub fn token_transfer_mint_to<'info>(
         ctx: Context<TokenMintTo>,
         _global_bump: u8,

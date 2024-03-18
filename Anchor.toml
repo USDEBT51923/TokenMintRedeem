@@ -5,13 +5,13 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-ab_token = "7vfAZgrKyYV2e3XTKuwisXfVcdSY7vMZ7N5m6ppNMboP"
+ab_token = "D5aNoP8aU9CnWtfCByURp42NEsTdS52GVyB7ufEK3KYS"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "https://api.mainnet-beta.solana.com"
+cluster = "https://virulent-wandering-reel.solana-devnet.quiknode.pro/c29fc55807faf8297c2fed73d3cd98150fd970ad/"
 wallet = "/root/.config/solana/id.json"
 
 [scripts]
